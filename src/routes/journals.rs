@@ -1,8 +1,16 @@
 use axum::{Router, routing::{get, post}, extract::{State, Path}, Json};
 use uuid::Uuid;
+use rust_decimal::Decimal;
+use serde::Deserialize;
 
 use crate::{app::AppState, error::AppError};
 use crate::models::journal::{JournalEntry, CreateJournalReq};
+
+#[derive(Deserialize)]
+pub struct PaginationParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -15,10 +23,10 @@ async fn create_journal(
     State(st): State<AppState>,
     Json(req): Json<CreateJournalReq>,
 ) -> Result<Json<JournalEntry>, AppError> {
-    // cek balance di sisi app (tetap ada cek DB saat posting)
-    let debit: f64 = req.lines.iter().map(|l| l.debit).sum();
-    let credit: f64 = req.lines.iter().map(|l| l.credit).sum();
-    if (debit - credit).abs() > 0.0001 {
+    // Cek balance di sisi app (tetap ada cek DB saat posting)
+    let debit: Decimal = req.lines.iter().map(|l| l.debit).sum();
+    let credit: Decimal = req.lines.iter().map(|l| l.credit).sum();
+    if debit != credit {
         return Err(AppError::BadRequest(format!(
             "Journal not balanced: debit={} credit={}",
             debit, credit
@@ -42,34 +50,43 @@ async fn create_journal(
     .fetch_one(&mut *tx)
     .await?;
 
-    for l in req.lines {
-        sqlx::query!(
-            r#"
-            INSERT INTO journal_lines (journal_entry_id, account_id, description, debit, credit)
-            VALUES ($1,$2,$3,$4,$5)
-            "#,
-            entry.id,
-            l.account_id,
-            l.description,
-            l.debit,
-            l.credit
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
+    // Bulk insert menggunakan QueryBuilder
+    let mut query_builder = sqlx::QueryBuilder::new(
+        "INSERT INTO journal_lines (journal_entry_id, account_id, description, debit, credit) "
+    );
+
+    query_builder.push_values(req.lines, |mut b, line| {
+        b.push_bind(entry.id)
+         .push_bind(line.account_id)
+         .push_bind(line.description)
+         .push_bind(line.debit)
+         .push_bind(line.credit);
+    });
+
+    let query = query_builder.build();
+    query.execute(&mut *tx).await?;
 
     tx.commit().await?;
     Ok(Json(entry))
 }
 
-async fn list_journals(State(st): State<AppState>) -> Result<Json<Vec<JournalEntry>>, AppError> {
+async fn list_journals(
+    State(st): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<PaginationParams>,
+) -> Result<Json<Vec<JournalEntry>>, AppError> {
+    let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
+
     let rows = sqlx::query_as!(
         JournalEntry,
         r#"
         SELECT id, company_id, entry_no, entry_date, memo, status
         FROM journal_entries
         ORDER BY entry_date DESC, entry_no DESC
-        "#
+        LIMIT $1 OFFSET $2
+        "#,
+        limit,
+        offset
     )
     .fetch_all(&st.db)
     .await?;

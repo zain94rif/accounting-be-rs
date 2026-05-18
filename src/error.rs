@@ -20,12 +20,42 @@ struct ErrBody {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, msg) = match &self {
-            AppError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
-            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-        };
-
-        (status, Json(ErrBody { error: msg })).into_response()
+        match &self {
+            AppError::Db(err) => {
+                if let Some(db_err) = err.as_database_error() {
+                    // Cek unique violation Postgres (error code 23505)
+                    if db_err.code().as_deref() == Some("23505") {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(ErrBody {
+                                error: "Kode unik sudah terdaftar. Silakan gunakan kode lain.".to_string(),
+                            }),
+                        )
+                            .into_response();
+                    }
+                }
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrBody {
+                        error: self.to_string(),
+                    }),
+                )
+                    .into_response()
+            }
+            AppError::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ErrBody {
+                    error: self.to_string(),
+                }),
+            )
+                .into_response(),
+            AppError::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrBody {
+                    error: msg.clone(),
+                }),
+            )
+                .into_response(),
+        }
     }
 }

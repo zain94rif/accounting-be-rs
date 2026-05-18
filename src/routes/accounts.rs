@@ -1,8 +1,15 @@
 use axum::{Router, routing::{get, post}, extract::{State, Path}, Json};
 use uuid::Uuid;
+use serde::Deserialize;
 
 use crate::{app::AppState, error::AppError};
 use crate::models::account::{Account, CreateAccountReq};
+
+#[derive(Deserialize)]
+pub struct PaginationParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -36,14 +43,21 @@ async fn create_account(
 
 async fn list_accounts(
     State(st): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<PaginationParams>,
 ) -> Result<Json<Vec<Account>>, AppError> {
+    let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
+
     let rows = sqlx::query_as!(
         Account,
         r#"
         SELECT id, company_id, code, name, account_type, normal_balance, is_active, parent_id
         FROM accounts
         ORDER BY code
-        "#
+        LIMIT $1 OFFSET $2
+        "#,
+        limit,
+        offset
     )
     .fetch_all(&st.db)
     .await?;

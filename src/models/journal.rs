@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 
 #[derive(Serialize)]
 pub struct JournalEntry {
@@ -25,6 +26,6 @@ pub struct CreateJournalReq {
 pub struct CreateJournalLineReq {
     pub account_id: Uuid,
     pub description: Option<String>,
-    pub debit: f64,
-    pub credit: f64,
+    pub debit: Decimal,
+    pub credit: Decimal,
 }
