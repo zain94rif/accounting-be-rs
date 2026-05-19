@@ -4,7 +4,7 @@ pub mod journals;
 
 use axum::Router;
 
-pub fn router() -> Router {
+pub fn router() -> Router<crate::app::AppState> {
     Router::new()
         .merge(health::router())
         .nest("/v1/accounts", accounts::router())

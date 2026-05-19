@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let pool = db::create_pool().await?;
-    db::run_migrations(&pool).await?;
+    // db::run_migrations(&pool).await?;
 
     let app = app::build_app(pool);
 
